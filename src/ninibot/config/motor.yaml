@@ -1,0 +1,9 @@
+motor_driver:
+  ros__parameters:
+    input_topic: "/target_joint_states"
+    publish_topic: "/joint_states"
+    real_state_topic: "/real_joint_states"
+    speed_scale: 1.0
+    accel_scale: 1.0
+    real_state_rate: 100.0
+    action_deadband_deg: 0.05

@@ -1,0 +1,57 @@
+# ROS / colcon
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments and editor files
+.venv/
+.venv-*/
+.env
+.env.*
+.vscode/
+.idea/
+*~
+
+# Machine-local hardware configuration
+data/calibration/camera_calibration.yaml
+data/calibration/captures/
+data/calibration/chessboard/
+data/calibration/images/
+data/calibration/*_samples.csv
+
+# Private or generated research artifacts
+data/archive/
+data/datasets/
+data/episodes/
+data/models/
+data/predictions/
+data/recordings/
+data/**/raw/
+data/trajectories/fine_align_prep/sessions/current_recording/
+data/trajectories/**/raw_recording.csv
+data/trajectories/**/raw_metadata.json
+data/trajectories/**/processed_samples.csv
+data/trajectories/**/latest_raw.*
+data/trajectories/**/fine_align_prep_raw_*
+*.bag
+*.db3
+*.mcap
+*.wav
+
+# Large source footage; keep edited portfolio media or external links instead
+media/raw/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

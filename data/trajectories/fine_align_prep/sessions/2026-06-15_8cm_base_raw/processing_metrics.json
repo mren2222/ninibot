@@ -1,0 +1,71 @@
+{
+  "duration_sec": 6.140013,
+  "sample_rate_hz": 100.0,
+  "duration_scale": 1.0,
+  "joint_names": [
+    "2",
+    "3",
+    "4"
+  ],
+  "max_abs_velocity_rad_s": [
+    0.9950137728217712,
+    0.9043129191627841,
+    1.1023663116792726
+  ],
+  "max_abs_acceleration_rad_s2": [
+    1.9169730914400134,
+    1.1360363214737248,
+    2.1783543314846874
+  ],
+  "max_abs_jerk_rad_s3": [
+    48.00227830278963,
+    6.482227944261582,
+    54.54751512702328
+  ],
+  "source_raw_duration_sec": 19.140013,
+  "trim_start_sec": 12.0,
+  "trim_end_sec": 1.0,
+  "path_smoothing": "spline",
+  "joint4_mode": "horizontal_offset",
+  "endpoint_radius_offset_m": 0.01,
+  "endpoint_z_offset_m": 0.02,
+  "endpoint_adjustment": {
+    "enabled": true,
+    "radius_offset_m": 0.01,
+    "z_offset_m": 0.02,
+    "original_radius_m": 0.17277151821874456,
+    "original_z_m": -0.06909375378931495,
+    "adjusted_radius_m": 0.18277151821874457,
+    "adjusted_z_m": -0.04909375378931495,
+    "adjusted_joint2_deg": 84.90570931710344,
+    "adjusted_joint3_deg": 20.90050425997663,
+    "adjusted_horizontal_joint4_deg": -100.80621357708007
+  },
+  "joint4_offset_profile": "horizontal_plus_decaying_offset",
+  "time_profile": "linear",
+  "jerk_smoothing": "none",
+  "jerk_smooth_window": 41,
+  "jerk_smooth_polyorder": 5,
+  "spline_smoothing": 0.0003,
+  "flat_velocity_threshold_deg_s": 2.0,
+  "flat_min_duration_sec": 0.35,
+  "flat_weight": 20.0,
+  "processed_json": "data/trajectories/fine_align_prep/sessions/2026-06-15_8cm_base_raw/processed_template.json",
+  "processed_csv": "data/trajectories/fine_align_prep/sessions/2026-06-15_8cm_base_raw/processed_samples.csv",
+  "plot": "data/trajectories/fine_align_prep/sessions/2026-06-15_8cm_base_raw/processed_joint_dynamics.png",
+  "comparison_plot": "data/trajectories/fine_align_prep/sessions/2026-06-15_8cm_base_raw/raw_vs_processed_comparison.png",
+  "plot_trajectory": "taught_start_to_taught_end_processed",
+  "plot_start_rad": [
+    -1.4898946770476007,
+    1.700832946,
+    0.367478115
+  ],
+  "plot_end_rad": [
+    1.4818841813246812,
+    0.36478261466369305,
+    -1.7594003333886579
+  ],
+  "latest_processed_json": "data/trajectories/fine_align_prep/sessions/2026-06-15_8cm_base_raw/latest_processed.json",
+  "plot_png": "data/trajectories/fine_align_prep/sessions/2026-06-15_8cm_base_raw/plot.png",
+  "comparison_plot_png": "data/trajectories/fine_align_prep/sessions/2026-06-15_8cm_base_raw/comparison_plot.png"
+}

@@ -1,0 +1,22 @@
+# Example values from one 640x480 camera. Recalibrate your own camera and do
+# not reuse these values for metric motion.
+image_width: 640
+image_height: 480
+camera_name: example_camera
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [552.056039992, 0, 272.943216851, 0, 554.402190302, 259.226680216, 0, 0, 1]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [-0.47141191505, 0.307749702695, 0.00123935160543, 0.00333125170783, -0.13058361313]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [552.056039992, 0, 272.943216851, 0, 0, 554.402190302, 259.226680216, 0, 0, 0, 1, 0]

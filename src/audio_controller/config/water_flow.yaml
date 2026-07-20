@@ -1,0 +1,18 @@
+water_flow_monitor_node:
+  ros__parameters:
+    device: ""
+    sample_rate: 16000
+    channels: 1
+    frame_ms: 50.0
+    baseline_sec: 2.0
+    band_low_hz: 800.0
+    band_high_hz: 6000.0
+    band_weight: 0.75
+    start_threshold_db: 8.0
+    stop_threshold_db: 4.0
+    min_start_sec: 0.30
+    min_stop_sec: 0.70
+    state_topic: "/water_flow/state"
+    debug_topic: "/water_flow/debug"
+    score_topic: "/water_flow/score"
+    command_topic: "/water_flow/command"

@@ -1,0 +1,19 @@
+# ArUco follower skill: move gripper tip XY toward a vertical ArUco marker.
+aruco_follower_node:
+  ros__parameters:
+    command_topic: /aruco_follower_command
+    status_topic: /aruco_follower_status
+    debug_image_topic: /aruco_follower/image
+    debug_marker_topic: /aruco_follower/markers
+    target_marker_id: 2
+    gripper_frame: grippertip
+    target_x_offset: 0.0
+    target_y_offset: 0.0
+    target_z_offset: 0.05
+    align_tolerance_m: 0.01
+    max_xy_step_m: 0.005
+    min_command_period_sec: 0.08
+    pre_pan_radius: 0.22
+    show_window: true
+    publish_debug_image: true
+    auto_start: true

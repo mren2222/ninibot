@@ -1,0 +1,31 @@
+# Target grippertip position in the service node's base frame.
+float64 target_x
+float64 target_y
+float64 target_z
+
+# Optional q1-q4 seed in radians. If empty, the service uses zeros clipped to limits.
+float64[] seed_q1234
+
+# If true, joint4 is fixed to seed_q1234[3] and only q1-q3 are solved.
+bool lock_joint4
+
+# If > 0, each optimized joint is constrained to seed +/- this many degrees.
+# If <= 0, only URDF/configured joint limits are used.
+float64 max_joint_step_deg
+
+# Required solution residual tolerance in meters.
+float64 ik_position_tolerance
+
+# Optional joint4 search bounds in degrees. Use joint4_min_deg <= joint4_max_deg.
+float64 joint4_min_deg
+float64 joint4_max_deg
+
+# Fixed joints used by the FK chain.
+float64 fixed_joint5_rad
+float64 joint6_rad
+---
+bool success
+string message
+float64[] q1234
+float64 error
+float64[] residual_xyz

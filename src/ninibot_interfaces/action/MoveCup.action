@@ -1,0 +1,15 @@
+# Goal
+# timeout_sec <= 0 uses the server default timeout.
+float32 timeout_sec
+# If true, a goal sent after move_cup_node already reports DONE succeeds immediately.
+bool succeed_on_existing_done
+---
+# Result
+bool success
+string final_status
+string failure_reason
+float32 elapsed_sec
+---
+# Feedback
+string status
+float32 elapsed_sec
