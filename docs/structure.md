@@ -1,8 +1,29 @@
-# Structure
+# Software architecture
 
-当前结构把底层能力和任务编排分开：底层 controller/perception package 不依赖主应用，主应用 `ninibot` 负责把它们组合成技能和 demo。
+Ninibot separates reusable robot capabilities from application-level task
+orchestration. The controller, perception, audio, and interface packages do not
+depend on the top-level application. The `ninibot` package composes them into
+observable skills and end-to-end demonstrations.
 
-## ROS 包
+```mermaid
+flowchart LR
+    Camera["Wrist camera"] --> Vision["vision_controller"]
+    Vision --> Skills["ninibot skills"]
+    Manager["Task manager"] <--> Actions["ROS 2 action servers"]
+    Actions <--> Skills
+    Skills --> Targets["/target_joint_states"]
+    Targets --> Motor["arm_controller motor bridge"]
+    Motor --> Arm["SO-101 / dry-run state"]
+    Arm --> Feedback["/real_joint_states"]
+    Feedback --> Skills
+    Interfaces["ninibot_interfaces"] --> Actions
+    Audio["audio_controller"] -. "standalone experiment" .-> Future["Future task integration"]
+```
+
+The dotted audio path represents future integration; the current water-flow
+monitor is a standalone experimental subsystem.
+
+## ROS 2 packages
 
 ```text
 src/
@@ -13,15 +34,18 @@ src/
   ninibot/
 ```
 
-## arm_controller
+## `arm_controller`
 
-负责机械臂本体、运动学、joint state 和真机 bridge。
+Owns the robot model, kinematics, joint-state plumbing, and physical motor
+bridge.
 
 ```text
 arm_controller/
   kinematics/
     cylindrical.py
     point_ik.py
+    grippertip_ik_solver.py
+    grippertip_ik_service.py
   motor/
     motor_driver.py
     target_to_rviz.py
@@ -30,47 +54,88 @@ arm_controller/
     gripper_pose_debug.py
     keyboard_point.py
     static_joints.py
+urdf/
+  so101.urdf
+  assets/
+launch/
+rviz/
 ```
 
-console script 直接指向这些子目录模块，包根目录不再保留同名 wrapper。
+Its console scripts point directly to the modules above; duplicate root-level
+wrappers are not retained.
 
-## vision_controller
+## `vision_controller`
 
-负责 perception，不承载任务状态机或 demo 编排。
+Provides reusable perception primitives without owning task state machines or
+demo orchestration.
 
 ```text
 vision_controller/
   aruco_detection.py
   aruco_tf.py
   hsv_detector.py
-  hybrid_detector.py
   yolo_detector.py
-  assets/
-    aruco/
-      marker PNG/PDF print assets
-      generate_aruco.py
-      pngs_to_letter_pdf.py
+  hybrid_detector.py
+assets/
+  aruco/
+    marker PNG/PDF print assets
+    generate_aruco.py
+    pngs_to_letter_pdf.py
 ```
 
-ArUco 打印资源随 `vision_controller` 安装到 `share/vision_controller/assets/aruco/`。
+ArUco print assets are installed under
+`share/vision_controller/assets/aruco/`.
 
-## ninibot_interfaces
+The three cup-detector options represent different engineering trade-offs:
 
-只放 ROS interface/action，避免 runtime 逻辑和消息定义耦合。
+- HSV provides a lightweight, model-free baseline for a controlled workcell.
+- YOLO provides semantic cup detection using user-supplied weights.
+- Hybrid mode uses YOLO as a region gate and HSV for the centering signal.
+
+## `audio_controller`
+
+Contains the experimental water-flow monitoring subsystem:
+
+```text
+audio_controller/
+  audio_input.py
+  audio_features.py
+  water_flow_detector.py
+  water_flow_monitor_node.py
+config/
+  water_flow.yaml
+launch/
+  water_flow_debug.launch.py
+```
+
+It is intentionally isolated from the production task manager until its
+behavior is validated as part of the full workcell.
+
+## `ninibot_interfaces`
+
+Contains ROS interface definitions only, keeping message schemas separate from
+runtime behavior:
 
 ```text
 action/
   GraspCup.action
   MoveCup.action
+srv/
+  SolveGrippertipIk.srv
 ```
 
-## ninibot
+## `ninibot`
 
-主应用 package，调用 `arm_controller`、`audio_controller`、`vision_controller` 和 `ninibot_interfaces`，承载上层技能、动作封装、任务编排、学习/策略工具、launch 和配置。
+The application package composes the lower-level packages into manipulation
+skills, actions, orchestration, data collection, and experimental learning
+tools.
 
 ```text
 ninibot/
   skills/
+    grasp_cup/
+    move_cup/
+    press_button/
     grasp_cup_node.py
     move_cup_node.py
     press_button_node.py
@@ -104,4 +169,26 @@ config/
 rviz/
 ```
 
-console scripts 直接指向 `ninibot.*` 子目录模块。launch 文件也安装在 `share/ninibot/launch/...`，所以常用入口是 `ros2 launch ninibot ...`。
+Console scripts resolve directly to `ninibot.*` modules. Launch files are
+installed recursively under `share/ninibot/launch/`, so the user-facing entry
+point remains:
+
+```bash
+ros2 launch ninibot <launch-file>.launch.py
+```
+
+## Design choices demonstrated by the repository
+
+- **Skill isolation:** grasp, transfer, and button press can be launched and
+  observed independently.
+- **Explicit orchestration:** ROS 2 actions and status topics expose progress
+  and failure states rather than hiding the workflow inside one process.
+- **Hardware abstraction:** the same target-joint contract feeds the real motor
+  bridge and dry-run visualization.
+- **Multiple perception backends:** HSV, YOLO, and hybrid detection can be
+  selected without rewriting the grasp state machine.
+- **Safe experimentation boundaries:** learned-policy and audio experiments are
+  separated from the main hardware demo.
+- **Traceable motion development:** raw teaching, processed templates,
+  diagnostics, and RViz comparison artifacts form a reproducible trajectory
+  workflow.

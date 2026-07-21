@@ -1,10 +1,16 @@
-# Learning
+# Learning and taught-trajectory experiments
 
-当前 learning 主线是先用 rule-based controller 采集 episode，再训练 structured imitation baseline。
+Ninibot keeps learned components separate from the production demo. The main
+manipulation flow uses explicit state machines and rule-based fine alignment;
+the learning path is an experimental baseline for data collection, offline
+evaluation, and RViz visualization.
 
-## 1. 数据采集
+Raw episodes and trained model weights are intentionally excluded from this
+public portfolio repository.
 
-`episode_logger` 记录:
+## 1. Structured episode collection
+
+`episode_logger` records synchronized structured signals:
 
 ```text
 real_joint_states
@@ -17,15 +23,17 @@ action deltas
 metadata
 ```
 
-默认 episode 目录:
+The default output directory is:
 
 ```text
 data/episodes/
 ```
 
-`episode_logger` 默认不启动；需要采集数据时显式传 `start_episode_logger:=True`。
+Logging is disabled by default. Enable it explicitly with
+`start_episode_logger:=True`.
 
-建议把不同批次的数据分成独立 dataset，避免旧参数、失败实验和新策略数据混在一起:
+Keep collection batches in separate dataset directories so controller changes,
+failed experiments, and newer demonstrations remain traceable:
 
 ```text
 data/datasets/dataset1/
@@ -33,7 +41,7 @@ data/datasets/dataset2/
 data/datasets/dataset3/
 ```
 
-如果要 archive 当前默认目录:
+To archive the current default episode directory:
 
 ```bash
 cd ~/ninibot
@@ -43,34 +51,48 @@ mv data/episodes "$ARCHIVE/episodes"
 mkdir -p data/episodes
 ```
 
-新的 fine-align 50 次采集可以直接写到 dataset2:
+This command moves the existing episode directory; inspect the paths before
+running it.
+
+A supervised 50-episode fine-alignment collection can write directly to
+`dataset2`:
 
 ```bash
 source install/setup.bash
+
 ros2 launch ninibot collect_fine_align_episodes.launch.py \
+  dry_run:=False \
   max_episodes:=50 \
   start_episode_logger:=True \
   save_images:=False \
   episode_root:=data/datasets/dataset2
 ```
 
-采集 demonstration 时默认使用 rule-based finealign。
+Use `dry_run:=False` only for a supervised, calibrated real-arm collection.
+Use `dry_run:=True` first to validate the logging and orchestration pipeline.
+Demonstrations use the rule-based fine-alignment controller.
 
-## 2. 训练 structured policy
+## 2. Train a structured imitation policy
 
-```bash
-python3 tools/ml/train_structured_policy.py
-```
-
-只训练 fine-align:
+The baseline predicts control deltas from structured state rather than raw
+images:
 
 ```bash
 python3 tools/ml/train_structured_policy.py \
+  --episode-root data/episodes \
+  --output-dir data/models/structured_policy
+```
+
+Train only on the `FINE_ALIGN` state:
+
+```bash
+python3 tools/ml/train_structured_policy.py \
+  --episode-root data/episodes \
   --cup-status FINE_ALIGN \
   --output-dir data/models/structured_policy_fine_align
 ```
 
-面向 integrated control 的推荐模型是 cylindrical fine-align policy。最小输入使用:
+The compact cylindrical policy uses these inputs:
 
 ```text
 error_x
@@ -80,16 +102,19 @@ servo_radius
 servo_z
 ```
 
-其中 `error_x` 和 `bbox_error` 来自视觉检测，`theta_deg`、`servo_radius`、`servo_z` 是当前 cylindrical pose。模型只输出:
+`error_x` and `bbox_error` come from vision. `theta_deg`, `servo_radius`, and
+`servo_z` describe the current cylindrical pose. The model predicts only:
 
 ```text
 action_delta_theta
 action_delta_radius
 ```
 
-运行时 `fine_align_policy_gate` 会把 `theta/radius/z + delta` 送进 cylindrical IK，得到 joint1/2/3/4，并保持 z 和 joint4 水平。也就是说训练不需要直接预测关节。
+At runtime, `fine_align_policy_gate` adds those deltas to the current
+cylindrical state and runs cylindrical IK to derive joints 1–4. The learned
+model therefore does not predict joint angles directly.
 
-dataset2 的推荐训练命令:
+Recommended command for the `dataset2` experiment:
 
 ```bash
 python3 tools/ml/train_structured_policy.py \
@@ -108,85 +133,103 @@ python3 tools/ml/train_structured_policy.py \
   --hidden-dim 128
 ```
 
-`--max-target-abs action_delta_radius=0.003` 会跳过半径 delta 大于 3mm 的异常行，主要用于过滤状态切换或第一帧初始化时的 radius 跳变。
+`--max-target-abs action_delta_radius=0.003` removes rows whose radial delta
+exceeds 3 mm. This filters discontinuities commonly introduced by state
+transitions or first-frame initialization.
 
-## 3. 离线评估
+## 3. Offline evaluation
 
-```bash
-python3 tools/ml/evaluate_structured_policy.py --plot
-```
-
-评估某个 episode:
+Evaluate a trained model against its validation split:
 
 ```bash
-python3 tools/ml/evaluate_structured_policy.py --episode episode_000021 --plot
+python3 tools/ml/evaluate_structured_policy.py \
+  --model data/models/finealign_dataset2_cyl_min/policy.pt \
+  --episode-root data/datasets/dataset2 \
+  --split val \
+  --plot
 ```
+
+Evaluate a specific episode:
+
+```bash
+python3 tools/ml/evaluate_structured_policy.py \
+  --model data/models/finealign_dataset2_cyl_min/policy.pt \
+  --episode-root data/datasets/dataset2 \
+  --episode episode_000021 \
+  --plot
+```
+
+Offline action error is useful for model comparison, but it is not evidence of
+real-arm task success, robustness, or safe motion.
 
 ## 4. RViz policy preview
 
-```bash
-ros2 launch ninibot preview_policy_demo.launch.py
-```
-
-这会打开 `grasp_and_move_cup` 主链路，并启用:
-
-```text
-policy_preview
-rviz2
-```
-
-policy ghost 发布到 `/policy_joint_states`，不会直接控制真机。
-
-## 5. Fine-align policy control
-
-主 demo 现在固定使用 rule-based fine-align。Policy 相关功能先保留为预览入口:
+Supply a trained model explicitly:
 
 ```bash
-ros2 launch ninibot preview_policy_demo.launch.py
+ros2 launch ninibot preview_policy_demo.launch.py \
+  dry_run:=True \
+  policy_model_path:=$PWD/data/models/finealign_dataset2_cyl_min/policy.pt
 ```
 
-真机策略控制要重新启用时，再把 gate 作为单独入口接回，不放在主 demo 的常用参数里。
+The launch starts the grasp-and-transfer chain in dry-run mode, starts RViz,
+and publishes the model prediction as `/policy_joint_states`. The policy ghost
+is visualized separately and does not directly control the physical arm.
 
-## 6. Fine-align-prep kinesthetic teaching
+The main demo remains rule-based. Real-arm policy control is intentionally not
+exposed through the standard demo launch.
 
-`FINE_ALIGN_PREP` 主 demo 默认使用处理后的示教轨迹：从 search/head-down 姿态移动到 fine-align 起始姿态。原来的 rule-based/builtin 轨迹不再用于真机默认执行，只作为 RViz 对比和项目展示素材保留。
+## 5. Fine-align-prep kinesthetic teaching
 
-### 6.1 记录 raw 轨迹
+The `FINE_ALIGN_PREP` phase moves the arm from its search/head-down pose to the
+fine-alignment starting pose. The main demo uses a processed kinesthetic
+trajectory for this phase. The earlier built-in trajectory remains only as an
+RViz comparison and project artifact.
 
-启动示教 launch:
+### 5.1 Record a raw trajectory
+
+Start with the workspace clear and the arm supported. The recording launch
+defaults to `dry_run:=True`; physical kinesthetic teaching requires an explicit,
+supervised real-arm run:
 
 ```bash
-ros2 launch ninibot record_prep_trajectory.launch.py
+ros2 launch ninibot record_prep_trajectory.launch.py dry_run:=False
 ```
 
-流程:
+The sequence is:
 
 ```text
 record_prep_trajectory
-  -> 发布 search pose 到 /target_joint_states
-  -> motor_driver 移动到 search pose
-  -> teach node 发布 /motor_torque_command: disable
-  -> 用手移动 joint2/3/4
-  -> 手动发送 finish
-  -> 保存 raw CSV 到 data/trajectories/fine_align_prep/sessions/current_recording/
+  -> publish the search pose to /target_joint_states
+  -> motor_driver moves to the search pose
+  -> the teaching node publishes /motor_torque_command: disable
+  -> the operator manually moves joints 2, 3, and 4
+  -> the operator sends the finish command
+  -> save raw CSV and metadata under
+     data/trajectories/fine_align_prep/sessions/current_recording/
 ```
 
-结束记录:
+Finish the recording:
 
 ```bash
-ros2 topic pub --once /fine_align_prep_teach/command std_msgs/msg/String "{data: finish}"
+ros2 topic pub --once \
+  /fine_align_prep_teach/command \
+  std_msgs/msg/String \
+  "{data: finish}"
 ```
 
-观察状态:
+Monitor teaching and torque state:
 
 ```bash
 ros2 topic echo /fine_align_prep_teach/status
 ros2 topic echo /motor_torque_status
 ```
 
-### 6.2 处理和平滑
+The stable raw aliases are `latest_raw.csv` and `latest_raw.json`.
 
-把 raw CSV 转成可 retarget 的 processed trajectory:
+### 5.2 Process and smooth the recording
+
+Convert the raw CSV into a retargetable trajectory template:
 
 ```bash
 ros2 run ninibot process_prep_trajectory \
@@ -200,52 +243,62 @@ ros2 run ninibot process_prep_trajectory \
   --no-latest
 ```
 
-输出:
+The current processor writes these fixed filenames:
 
 ```text
-<raw_name>_processed.json
-<raw_name>_processed.csv
-<raw_name>_metrics.json
-<raw_name>_plot.png
-<raw_name>_comparison.png
-latest_processed.json
-plot.png
-comparison_plot.png
+processed_template.json
+processed_samples.csv
+processing_metrics.json
+processed_joint_dynamics.png
+raw_vs_processed_comparison.png
 ```
 
-处理逻辑:
+The two PNG files are written when plotting dependencies are available. Because
+the example command uses `--no-latest`, it does not create
+`latest_processed.json`, `plot.png`, or `comparison_plot.png`. Omit
+`--no-latest` when those convenience aliases are desired.
+
+The processing pipeline is:
 
 ```text
 raw q(t)
--> 裁掉前 trim-start-sec 秒无效段
--> 重采样
--> 计算 delta_shape = q(t) - linear_interpolate(start, end)
--> 用 smoothing spline 拟合 delta_shape，缺 SciPy 时 fallback 到 Savitzky-Golay/moving average
--> 对原始记录中低速持续段加 spline 权重，让平台段尽量保持平台，不被平滑成反向小动作
--> joint4 不再使用记录的 joint4 shape，而是实时计算 horizontal_wrist(joint2, joint3) + offset
--> offset 使用 smootherstep 从起点低头 offset 平滑衰减到 0，让终点回到水平 wrist
--> 强制 delta_shape 首尾为 0
--> 保存成可 retarget 模板
+  -> trim invalid time from the beginning and end
+  -> resample
+  -> compute delta_shape = q(t) - linear_interpolate(start, end)
+  -> fit delta_shape with a smoothing spline
+  -> fall back to Savitzky–Golay or moving-average smoothing without SciPy
+  -> give sustained low-velocity regions additional spline weight
+  -> preserve those plateaus instead of smoothing them into reverse motion
+  -> recompute joint 4 as horizontal_wrist(joint2, joint3) + offset
+  -> decay the initial wrist offset to zero with smootherstep
+  -> force delta_shape to zero at both endpoints
+  -> save a retargetable template
 ```
 
-运行时使用:
+Runtime retargeting uses:
 
 ```text
 joint2/3 = interpolate(current_start, desired_end) + delta_shape(t)
-joint4 = horizontal_wrist(joint2, joint3) + start_offset * (1 - smootherstep(t))
+joint4   = horizontal_wrist(joint2, joint3)
+           + start_offset * (1 - smootherstep(t))
 ```
 
-这样 joint2/3 保留示教轨迹形状，但 joint4 永远跟随当前 joint2/3 的水平 wrist 解，并平滑回到水平。
+This preserves the demonstrated shape for joints 2 and 3 while keeping joint 4
+consistent with a horizontal-wrist solution and smoothly removing the initial
+head-down offset.
 
-`plot.png` 是当前 session 内最近一次 processed runtime trajectory 的稳定文件名，内容是已经 retarget 到当前 demo search 起点和 fine-align-prep 终点后的 joint2/3/4 位置、速度、加速度和 jerk。`comparison_plot.png` 对比同一个 retarget 后的 collected shape 和 processed trajectory。
+`processed_joint_dynamics.png` plots position, velocity, acceleration, and jerk
+for the processed taught-start-to-taught-end trajectory.
+`raw_vs_processed_comparison.png` compares the retargeted raw shape and the
+processed trajectory over those same taught endpoints.
 
-### 6.3 RViz 对比 builtin reference 和 processed trajectory
+### 5.3 Compare the built-in and processed paths in RViz
 
 ```bash
 ros2 launch ninibot preview_prep_trajectory.launch.py
 ```
 
-这会发布:
+The preview publishes:
 
 ```text
 /fine_align_prep_builtin_joint_states
@@ -254,29 +307,49 @@ ros2 launch ninibot preview_prep_trajectory.launch.py
 /fine_align_prep_processed_path
 ```
 
-RViz 中显示两条 ghost/path:
+RViz displays two ghosts and paths:
 
 ```text
-builtin reference: 原 rule-based 轨迹，只用于对比和展示
-processed: session processed_template/latest_processed JSON 中的处理后轨迹，joint2/3 来自示教 shape，joint4 实时水平 + 平滑 offset
+built-in reference
+  Earlier rule-based trajectory retained for comparison only
+
+processed
+  Joint 2/3 shape from the taught template, with joint 4 recomputed as a
+  horizontal wrist plus the smoothed initial offset
 ```
 
-preview 启动时会把 builtin reference 单独保存到:
+The preview also saves the built-in comparison trajectory to:
 
 ```text
 data/trajectories/fine_align_prep/references/rule_based_fine_align_prep_reference.json
 ```
 
-这个文件是展示项目时可以直接引用的“优化前路径”素材。真正部署时使用 session 里的 processed template，不依赖这个 reference 文件。
+That file is a reproducible “before” artifact for project presentation. Runtime
+deployment uses the processed session template and does not depend on the
+reference file.
 
-### 6.4 主 demo 默认使用 processed FINE_ALIGN_PREP
+### 5.4 Processed trajectory used by the main demo
 
-现在主 demo 默认使用 `data/trajectories/fine_align_prep/sessions/2026-06-15_8cm_base_raw/processed_template.json`，不再需要 `fine_align_prep_mode`。`FINE_ALIGN_PREP` 的终点唯一来自 processed template 里的 `processed_end_rad`；旧的 `fine_align_prep_joint2/3` 参数入口已经删除:
+The current default is:
 
-```bash
-ros2 launch ninibot grasp_and_move_cup_demo.launch.py
+```text
+data/trajectories/fine_align_prep/sessions/2026-06-15_8cm_base_raw/processed_template.json
 ```
 
-播放时长或 shape 强度目前直接在 `src/ninibot/ninibot/task_params.py` 里调，等出现第二套稳定场景后再重新引入场景 YAML。
+The `FINE_ALIGN_PREP` endpoint comes from the template's
+`processed_end_rad`; the former `fine_align_prep_joint2/3` parameter path has
+been removed.
 
-processed fine-align-prep 只替换 `FINE_ALIGN_PREP` 阶段的 joint2/3/4；joint1 仍由视觉 tracking 的 theta 决定，joint5/6 保持原逻辑。
+Start the main chain with:
+
+```bash
+ros2 launch ninibot grasp_and_move_cup_demo.launch.py dry_run:=True
+```
+
+Playback duration and shape scale are currently configured in
+`src/ninibot/ninibot/task_params.py`. A scene-specific YAML layer can be added
+when multiple calibrated workcells need stable parameter sets.
+
+The processed template replaces joints 2, 3, and 4 only during
+`FINE_ALIGN_PREP`. Joint 1 remains controlled by the vision-derived azimuth,
+while joints 5 and 6 retain their existing behavior.
