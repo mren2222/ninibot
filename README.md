@@ -16,6 +16,129 @@ implemented around an SO-101 arm. It locks a destination marker, searches for
 and aligns with a cup, transfers the cup through a staged motion plan, then
 aligns with and presses a marked button.
 
+**[Part 1 · Project highlights](#part-1-project-highlights)** ·
+**[Part 2 · Technical walkthrough](#part-2-technical-walkthrough)**
+
+## Part 1: Project highlights
+
+### Demo videos
+
+Click a thumbnail or title to watch on YouTube.
+
+| Demo 1 · YouTube Shorts | Demo 2 · YouTube |
+| :---: | :---: |
+| [![Watch Ninibot demo 1 on YouTube](https://i.ytimg.com/vi/3JaoesLpO_s/hqdefault.jpg)](https://www.youtube.com/shorts/3JaoesLpO_s) | [![Watch Ninibot demo 2 on YouTube](https://i.ytimg.com/vi/n-ShdZxDUmQ/hqdefault.jpg)](https://youtu.be/n-ShdZxDUmQ) |
+| [▶ Watch demo 1](https://www.youtube.com/shorts/3JaoesLpO_s) | [▶ Watch demo 2](https://youtu.be/n-ShdZxDUmQ) |
+
+### Project at a glance
+
+| | |
+| --- | --- |
+| **My work** | System architecture, perception integration, kinematics and motion logic, manipulation state machines, ROS 2 orchestration, hardware tooling, tests, and experimental learning pipelines |
+| **Core stack** | Python, ROS 2 Jazzy, OpenCV, ArUco, NumPy, PyTorch, Ultralytics YOLO, RViz, Feetech / LeRobot SO-101 |
+| **Implemented scope** | Destination scan, cup search and visual alignment, grasp, staged transfer and release, marker-guided button press, dry-run visualization, and diagnostic tooling |
+| **Repository evidence** | 5 ROS 2 packages · 3 selectable cup-perception backends · 2 actions + 1 IK service · 25 focused test modules containing 112 test functions |
+| **Status** | Active research prototype tuned for one tabletop workcell; the production demo is rule/state-machine based |
+
+### Key contributions
+
+#### 1. Automated demonstration collection with physical scene reset
+
+I built a repeatable collection loop for imitation learning: the rule-based
+visual controller generates fine-alignment demonstrations, the robot picks up
+and randomly repositions the cup, and the next episode starts after reset and
+settling. Normal collection cycles do not require someone to reposition the cup
+between episodes. Sampled placement targets are checked for reachability.
+
+[Collection orchestrator](src/ninibot/ninibot/orchestration/fine_align_episode_collector.py) ·
+[Random placement](src/ninibot/ninibot/skills/random_place_cup_node.py) ·
+[Learning pipeline](#automated-data-collection)
+
+#### 2. Hand-guided teaching becomes a reusable motion template
+
+For the transition from the search pose to fine alignment, I record a
+hand-guided movement with motor torque disabled, then resample and smooth its
+shape, preserve its endpoints, and reconstruct wrist orientation. The resulting
+template adapts to the current starting pose and is used by the manipulation
+pipeline. This makes a complex transition easier to author and refine.
+
+[Teaching recorder](src/ninibot/ninibot/trajectories/record_prep_trajectory.py) ·
+[Trajectory processing](src/ninibot/ninibot/trajectories/prep_trajectory.py) ·
+[Recorded case study](#a-trajectory-teaching-case-study)
+
+#### 3. Camera calibration and coordinate transforms connect vision to motion
+
+I implemented checkerboard-based intrinsic calibration with reprojection-error
+reporting, modeled the camera mounting and optical frames in the robot URDF,
+and used TF to transform camera observations into the robot base frame.
+ArUco geometry tools inspect target positions and frame axes so calibration
+and manipulation can be debugged together.
+
+[Calibration tools](tools/calibration/calibrate_camera.py) ·
+[TF conversion](src/vision_controller/vision_controller/aruco_tf.py) ·
+[Geometry details](#camera-calibration-and-coordinate-frames)
+
+#### 4. Hybrid perception separates object identity from control localization
+
+YOLO identifies the cup region; HSV supplies the centroid used for visual
+feedback. Candidate gating, temporal continuity, reuse of the previous region
+of interest, and task-dependent fallbacks address ambiguous detections and
+short tracking losses. HSV, YOLO, and hybrid backends share the same grasp
+controller, making their behavior comparable within one system.
+
+[Hybrid detector](src/vision_controller/vision_controller/hybrid_detector.py) ·
+[Perception design](#2-perception-backends-express-different-trade-offs)
+
+#### 5. Closed-loop skills handle uncertainty throughout the task
+
+Image errors drive repeated alignment corrections. Multi-frame settling,
+hysteresis, and detection-loss recovery control when the robot advances or
+searches again. The destination is statistically locked before grasping, while
+button pressing uses marker geometry and bounded IK corrections. These choices
+make the task's decisions and failure states observable.
+
+[Grasp state machine](src/ninibot/ninibot/skills/grasp_cup/controller.py) ·
+[Controller details](#controller-and-motion-design)
+
+#### 6. Motion planning accounts for the tabletop workspace
+
+Transfer motion follows lift → retract → rotate → extend → lower, reducing
+the end-effector's rotation radius before the arm turns. Taught transitions
+provide another way to author a compact motion shape, with smoothing and
+retargeting preparing it for execution. Space savings from the taught path
+remain to be quantified; smoothing alone does not establish a smaller sweep.
+
+[Carry planner](src/ninibot/ninibot/skills/move_cup/carry_planner.py) ·
+[Motion design](#4-transfer-is-planned-in-robot-centered-cylindrical-space)
+
+#### 7. A complete ROS 2 system with testable components
+
+I integrated perception, kinematics, skills, ROS 2 actions, motor execution,
+calibration tools, and learning experiments across five packages. Core decision
+logic is separated from ROS I/O for focused testing, and RViz previews and
+individual skill launches support diagnosis before a full hardware run.
+
+[Architecture](#system-architecture) ·
+[Tests and validation](#evidence-and-validation) ·
+[Repository guide](#explore-the-repository)
+
+The main hardware demo uses rule-based control. Imitation learning currently
+covers automated demonstration collection, offline training/evaluation, and
+RViz policy preview.
+
+---
+
+## Part 2: Technical walkthrough
+
+[Task flow](#what-the-robot-does) ·
+[Calibration and TF](#camera-calibration-and-coordinate-frames) ·
+[Controllers and motion](#controller-and-motion-design) ·
+[Architecture](#system-architecture) ·
+[Trajectory case study](#a-trajectory-teaching-case-study) ·
+[Validation](#evidence-and-validation) ·
+[Learning experiments](#controlled-experiments-beyond-the-main-demo) ·
+[Setup and documentation](#explore-the-repository)
+
 The goal was not to produce one scripted demo. I built the project as a set of
 observable and testable subsystems: interchangeable perception backends,
 feedback-driven skill state machines, cylindrical and URDF-based kinematics,
@@ -29,26 +152,7 @@ constraints. Ninibot addresses those problems with multi-frame target locks,
 hysteresis and recovery behavior, retract-before-rotate transfer motion,
 bounded incremental IK, explicit failure states, and RViz-first validation.
 
-## Demo videos
-
-Click a thumbnail or title to watch on YouTube.
-
-| Demo 1 · YouTube Shorts | Demo 2 · YouTube |
-| :---: | :---: |
-| [![Watch Ninibot demo 1 on YouTube](https://i.ytimg.com/vi/3JaoesLpO_s/hqdefault.jpg)](https://www.youtube.com/shorts/3JaoesLpO_s) | [![Watch Ninibot demo 2 on YouTube](https://i.ytimg.com/vi/n-ShdZxDUmQ/hqdefault.jpg)](https://youtu.be/n-ShdZxDUmQ) |
-| [▶ Watch demo 1](https://www.youtube.com/shorts/3JaoesLpO_s) | [▶ Watch demo 2](https://youtu.be/n-ShdZxDUmQ) |
-
-## Project at a glance
-
-| | |
-| --- | --- |
-| **My work** | System architecture, perception integration, kinematics and motion logic, manipulation state machines, ROS 2 orchestration, hardware tooling, tests, and experimental learning pipelines |
-| **Core stack** | Python, ROS 2 Jazzy, OpenCV, ArUco, NumPy, PyTorch, Ultralytics YOLO, RViz, Feetech / LeRobot SO-101 |
-| **Implemented scope** | Destination scan, cup search and visual alignment, grasp, staged transfer and release, marker-guided button press, dry-run visualization, and diagnostic tooling |
-| **Repository evidence** | 5 ROS 2 packages · 3 selectable cup-perception backends · 2 actions + 1 IK service · 25 focused test modules containing 112 test functions |
-| **Status** | Active research prototype tuned for one tabletop workcell; the production demo is rule/state-machine based |
-
-## What the robot does
+### What the robot does
 
 ```mermaid
 flowchart LR
@@ -64,7 +168,7 @@ placement target **before** grasping the cup, so the arm does not need to search
 the scene while carrying an object. Each major step publishes status and can be
 run independently during debugging.
 
-## The engineering problem
+### The engineering problem
 
 A reliable tabletop demo needs more than object detection and a list of joint
 poses:
@@ -85,9 +189,39 @@ poses:
 The project therefore separates perception, decision logic, geometry, ROS I/O,
 and motor execution rather than hiding them in one monolithic node.
 
-## Engineering highlights
+### Camera calibration and coordinate frames
 
-### 1. Detection became a closed-loop acquisition process
+Metric manipulation depends on both camera calibration and a consistent
+transform chain:
+
+```text
+robot base → arm joints → grippertip → camera → camera_optical_frame
+```
+
+The intrinsic-calibration tool detects checkerboard corners across multiple
+views, solves for the camera matrix and distortion coefficients, reports RMS
+and per-image reprojection errors, and writes a ROS-compatible calibration
+file. The physical checkerboard and marker dimensions are specified in metres.
+
+The URDF defines the fixed camera mounting relative to the gripper tip and a
+separate optical frame. The robot state publisher uses joint feedback to
+provide the moving transform chain; TF converts ArUco observations from the
+camera optical frame into base-frame positions used by manipulation.
+
+The extrinsic-check tool displays camera axes and marker/gripper positions in
+the base frame, and summarizes repeated observations. Camera mounting
+extrinsics are configured in the URDF and checked with these tools; the
+repository does not include an automatic hand-eye calibration solver.
+Measurement accuracy still depends on the physical calibration and workcell.
+
+[Intrinsic calibration](tools/calibration/calibrate_camera.py) ·
+[Robot and camera frames](src/arm_controller/urdf/so101.urdf) ·
+[Extrinsic checks](tools/calibration/check_aruco_extrinsics.py) ·
+[Setup instructions](docs/calibration.md)
+
+### Controller and motion design
+
+#### 1. Detection became a closed-loop acquisition process
 
 The grasp controller progresses through explicit phases:
 
@@ -107,7 +241,7 @@ period (1.5 seconds in the public defaults). A longer loss returns the
 controller to search. The transition logic lives in a pure, dataclass-based
 controller, which makes recovery behavior testable without a camera or arm.
 
-### 2. Perception backends express different trade-offs
+#### 2. Perception backends express different trade-offs
 
 The same grasp state machine can use three backends:
 
@@ -124,7 +258,7 @@ across short misses, and enables state-dependent full-frame fallbacks. This
 separates “which object is the cup?” from “where is the most stable point for
 feedback control?” without claiming an unmeasured accuracy improvement.
 
-### 3. The destination is locked before the scene changes
+#### 3. The destination is locked before the scene changes
 
 The placement marker is observed in the camera frame, transformed into the
 robot base frame, and sampled repeatedly. Public defaults require five samples;
@@ -137,7 +271,7 @@ transfer stage receives a fixed target before the gripper changes the scene.
 If the marker disappears during sample collection, the lock is discarded and
 the scan resumes.
 
-### 4. Transfer is planned in robot-centered cylindrical space
+#### 4. Transfer is planned in robot-centered cylindrical space
 
 Cup motion is represented as `(theta, radius, z)`, which aligns naturally with
 the tabletop task:
@@ -158,7 +292,7 @@ Minimum-jerk profiles are used for staged transitions, while the motor layer
 adds per-joint velocity and acceleration limiting with braking-distance and
 overshoot checks.
 
-### 5. Button pressing is solved from marker geometry, not memorized joints
+#### 5. Button pressing is solved from marker geometry, not memorized joints
 
 The button target comes from an ArUco pose plus a calibrated marker-relative
 offset. Camera observations are transformed to the base frame and compared
@@ -171,7 +305,7 @@ maximum joint change; the ROS service path also has an internal-solver
 fallback. Once aligned, explicit press, lift, repeat, timeout, and failure
 phases keep the behavior inspectable.
 
-### 6. Kinesthetic teaching produces a retargetable motion, not a recording
+#### 6. Kinesthetic teaching produces a retargetable motion, not a recording
 
 For the transition from a head-down search pose to fine alignment, I wanted to
 preserve the useful shape of a hand-guided movement without hard-coding its
@@ -200,7 +334,7 @@ joint4(t) = horizontal_wrist(joint2, joint3)
 This keeps the wrist orientation meaningful after joints 2 and 3 are
 retargeted.
 
-## System architecture
+### System architecture
 
 ```mermaid
 flowchart TB
@@ -264,7 +398,7 @@ buried inside a single process.
 | `ninibot_interfaces` | `GraspCup`, `MoveCup`, and `SolveGrippertipIk` contracts |
 | `ninibot` | Skills, actions, orchestration, trajectory tooling, logging, policies, launch, and configuration |
 
-## A trajectory-teaching case study
+### A trajectory-teaching case study
 
 The public repository includes one processed `FINE_ALIGN_PREP` artifact so the
 motion-development workflow can be inspected without publishing raw operator
@@ -286,7 +420,7 @@ The companion
 shows the derivatives used to inspect the processed motion. This is a
 traceable engineering artifact, not a task-performance or safety benchmark.
 
-## Evidence and validation
+### Evidence and validation
 
 The repository contains 25 focused test modules with 112 test functions. They
 cover geometry, controller transitions, target locking, search recovery, carry
@@ -312,9 +446,9 @@ To run the focused tests after building and sourcing the workspace:
 python3 -m pytest src/ninibot/test -q
 ```
 
-## Controlled experiments beyond the main demo
+### Controlled experiments beyond the main demo
 
-### Structured imitation learning
+#### Structured imitation learning
 
 The episode logger records joint feedback, target joints, vision errors, skill
 states, action deltas, metadata, and optional images. The experimental
@@ -327,14 +461,40 @@ It is intentionally not the controller used by the main hardware demo. This
 keeps learning inside the existing geometric envelope and creates an
 observation step before hardware integration.
 
-### Automated data collection
+#### Automated data collection
 
-The learning launch can reset cup placement between episodes, run the
-rule-based fine-alignment controller as the demonstrator, and record datasets
-with episode-level metadata. Dataset batches remain separate so changes in
-controller parameters and failed experiments stay traceable.
+The collection launch connects the rule-based visual controller, episode
+logger, collection orchestrator, and random-placement skill into a repeatable
+cycle:
 
-### Audio water-flow sensing
+```text
+Search and visually fine-align → finish/save episode
+    → grip cup → move to a sampled placement → release and return
+    → wait for settling → start the next episode
+```
+
+The demonstrator is the closed-loop rule-based controller. The logger samples
+the latest vision errors, real/target joints, task states, and action deltas,
+with metadata and optional images. The placement skill samples a new tabletop
+location and checks angular/radial bounds and IK reachability before executing
+the reset. Normal successful cycles therefore do not need manual cup placement
+between episodes.
+
+The orchestrator supports episode limits, pause/resume, reset timeouts, and
+configurable behavior after failures. Physical collection remains supervised;
+automatic reset does not imply recovery from every hardware or scene failure.
+
+These demonstrations train a structured imitation policy offline. The training
+script splits data by episode to keep samples from the same episode out of both
+training and validation sets. Dataset batches remain separate so controller
+changes and collection runs stay traceable. Policy deployment and online
+retraining are not part of this collection loop.
+
+[Collection launch](src/ninibot/launch/learning/collect_fine_align_episodes.launch.py) ·
+[Episode logger](src/ninibot/ninibot/logging/episode_logger.py) ·
+[Offline training](tools/ml/train_structured_policy.py)
+
+#### Audio water-flow sensing
 
 The standalone audio subsystem combines RMS and 800–6000 Hz band energy,
 learns a median ambient baseline, then applies distinct start/stop thresholds
@@ -342,7 +502,7 @@ and minimum dwell times. The result behaves like a debounced hysteresis
 detector rather than a single amplitude threshold. It is an experimental
 extension and is not connected to the full task manager.
 
-## Selected design decisions and trade-offs
+### Selected design decisions and trade-offs
 
 | Problem | Decision | Why / trade-off |
 | --- | --- | --- |
@@ -354,7 +514,7 @@ extension and is not connected to the full task manager.
 | Learned actions may violate robot geometry | Predict small cylindrical deltas and retain IK/limits | Less end-to-end, but easier to inspect and constrain |
 | Hardware makes iteration expensive | Dry-run by default with independent skills and diagnostic streams | RViz is not collision proof, but catches integration errors before motor enable |
 
-## Limitations and next steps
+### Limitations and next steps
 
 Ninibot is an active research prototype, not a general-purpose manipulation
 stack.
@@ -374,7 +534,7 @@ validate across lighting and object changes, compare rule-based and learned
 fine alignment quantitatively, and connect water-flow feedback only after
 workcell-level validation.
 
-## Explore the repository
+### Explore the repository
 
 ```text
 src/
@@ -432,7 +592,7 @@ YOLO/hybrid modes require user-supplied weights.
 
 </details>
 
-## Safety, license, and attribution
+### Safety, license, and attribution
 
 This software can command physical motors. Keep an emergency stop within reach,
 use conservative speed and torque limits, keep people and fragile objects
