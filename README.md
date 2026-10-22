@@ -29,6 +29,15 @@ constraints. Ninibot addresses those problems with multi-frame target locks,
 hysteresis and recovery behavior, retract-before-rotate transfer motion,
 bounded incremental IK, explicit failure states, and RViz-first validation.
 
+## Demo videos
+
+Click a thumbnail or title to watch on YouTube.
+
+| Demo 1 · YouTube Shorts | Demo 2 · YouTube |
+| :---: | :---: |
+| [![Watch Ninibot demo 1 on YouTube](https://i.ytimg.com/vi/3JaoesLpO_s/hqdefault.jpg)](https://www.youtube.com/shorts/3JaoesLpO_s) | [![Watch Ninibot demo 2 on YouTube](https://i.ytimg.com/vi/n-ShdZxDUmQ/hqdefault.jpg)](https://youtu.be/n-ShdZxDUmQ) |
+| [▶ Watch demo 1](https://www.youtube.com/shorts/3JaoesLpO_s) | [▶ Watch demo 2](https://youtu.be/n-ShdZxDUmQ) |
+
 ## Project at a glance
 
 | | |
