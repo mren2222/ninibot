@@ -126,6 +126,27 @@ The main hardware demo uses rule-based control. Imitation learning currently
 covers automated demonstration collection, offline training/evaluation, and
 RViz policy preview.
 
+### Engineering approach
+
+I use geometry to relate frames and constrain motion, measurements to determine
+workcell-specific parameters, and repeatable comparisons to evaluate changes.
+
+- **Compare motion before hardware execution.** RViz plays the original
+  rule-based reference and the processed taught trajectory side by side, with
+  synchronized robot models and colored paths. Separate plots compare the raw
+  taught shape with its processed version.
+  [Trajectory comparison workflow](#rviz-motion-comparison-and-trajectory-records)
+- **Turn physical setup into reusable parameters.** Offset-measurement tools
+  express a positioned gripper or wrist relative to an ArUco marker, summarize
+  repeated samples, and optionally write the measured mean into task
+  configuration. This reduces manual dimension-taking and parameter entry.
+  [Measurement-based configuration](#measurement-based-task-configuration)
+- **Make failures observable and experiments traceable.** Focused tools expose
+  coordinate axes, joint feedback, message age, target errors, and perception
+  results. CSV logs, trajectory samples, processing settings, and derivative
+  plots provide records for comparing changes and isolating faults.
+  [Diagnostics and experiment records](#layered-diagnostics-and-experiment-records)
+
 ---
 
 ## Part 2: Technical walkthrough
@@ -135,6 +156,7 @@ RViz policy preview.
 [Controllers and motion](#controller-and-motion-design) ·
 [Architecture](#system-architecture) ·
 [Trajectory case study](#a-trajectory-teaching-case-study) ·
+[Engineering tools](#engineering-tools-and-iteration-workflow) ·
 [Validation](#evidence-and-validation) ·
 [Learning experiments](#controlled-experiments-beyond-the-main-demo) ·
 [Setup and documentation](#explore-the-repository)
@@ -419,6 +441,101 @@ The companion
 [joint-dynamics plot](data/trajectories/fine_align_prep/sessions/2026-06-15_8cm_base_raw/processed_joint_dynamics.png)
 shows the derivatives used to inspect the processed motion. This is a
 traceable engineering artifact, not a task-performance or safety benchmark.
+
+### Engineering tools and iteration workflow
+
+The supporting tools make individual assumptions inspectable: how a target is
+measured, which frame contains an offset, how a motion differs from its
+reference, and whether the feedback needed by a controller is arriving.
+
+#### RViz motion comparison and trajectory records
+
+The current preview compares **two** motion streams in RViz:
+
+| Comparison | Representation | What it helps inspect |
+| --- | --- | --- |
+| Original rule-based reference vs processed taught trajectory | Two robot models and colored paths in RViz | Motion shape and posture over the same preview time window |
+| Raw taught shape vs processed taught trajectory | Generated comparison plots | How processing changes joint position and its derivatives |
+| Processed trajectory diagnostics | Position, velocity, acceleration, and jerk plots and metrics | Motion characteristics that need review before execution |
+
+The [preview launch](src/ninibot/launch/learning/preview_prep_trajectory.launch.py)
+starts two robot state publishers with independent TF prefixes, places the
+models side by side, and loads the
+[RViz display configuration](src/ninibot/rviz/fine_align_prep_preview.rviz).
+The [preview node](src/ninibot/ninibot/trajectories/preview_prep_trajectory.py)
+samples both motions against a shared elapsed time and publishes separate
+joint-state and path topics:
+
+```text
+/fine_align_prep_builtin_joint_states    /fine_align_prep_builtin_path
+/fine_align_prep_processed_joint_states  /fine_align_prep_processed_path
+```
+
+The reference is reconstructed with joint velocity/acceleration limiters and
+the earlier wrist-update logic. The processed motion is retargeted to the
+preview's starting and target poses. The reference samples, configuration, and
+derivative metrics can also be saved as JSON, preserving a reproducible
+baseline for later comparisons.
+
+After building and sourcing the workspace, run from the repository root:
+
+```bash
+ros2 launch ninibot preview_prep_trajectory.launch.py
+```
+
+The [processing tool](src/ninibot/ninibot/trajectories/process_prep_trajectory.py)
+generates the raw-versus-processed plots separately. Raw teaching is not a third
+simultaneous RViz stream in this launch. These displays are kinematic previews;
+they do not simulate contact dynamics or establish collision-free motion.
+
+#### Measurement-based task configuration
+
+For task-specific contact and placement offsets, a useful workflow is:
+
+```text
+Position the arm at the desired task pose
+    → observe the marker and robot frame
+    → express the relative position in the intended coordinate frame
+    → collect samples and inspect mean / standard deviation
+    → optionally write the mean into task configuration
+    → validate the resulting motion
+```
+
+The [grippertip offset tool](tools/calibration/measure_grippertip_marker_offset.py)
+combines the observed marker pose with TF to express the current grippertip
+position in marker coordinates. Its optional write mode updates the
+`PRESS_BUTTON_PARAMS` target offsets.
+
+The [move-cup offset tool](tools/calibration/measure_move_cup_marker_offset.py)
+supports a selectable target frame, defaulting to `wrist`, and can capture
+samples only when Enter is pressed. Its optional write mode updates the
+`MOVE_CUP_PARAMS` target offsets. Both tools report the sample mean and standard
+deviation and show the existing values before an interactive write.
+
+This turns a physical setup procedure into reusable configuration while
+retaining explicit geometric transforms. Sample spread describes repeatability;
+accuracy also depends on camera calibration, the robot model, and TF, and
+should be checked at additional poses.
+
+#### Layered diagnostics and experiment records
+
+| Tool | Observable output | Engineering use |
+| --- | --- | --- |
+| [Intrinsic check](tools/calibration/check_intrinsics.py) | Marker reprojection mean, RMS, and maximum error | Inspect the camera-model fit before relying on pose estimates |
+| [Extrinsic check](tools/calibration/check_aruco_extrinsics.py) | Camera axes, marker/gripper positions, repeated-observation statistics | Inspect frame conventions and camera-to-base geometry |
+| [Gripper pose debug](src/arm_controller/arm_controller/debug/gripper_pose_debug.py) | Gripper, camera, and optical-frame poses/axes; joint-message age and TF diagnostics | Distinguish missing feedback or transforms from unexpected geometry |
+| [Button pose recorder](tools/calibration/press_button_pose_recorder.py) | Target error, relative positions, joint angles, suggested wrist pitch, message age, optional CSV | Preserve observations for tuning and before/after comparisons |
+| [Cylindrical pose reader](tools/debug/gripper_cylindrical_pose.py) | Motor readings converted through kinematics into radius, azimuth, and height | Inspect hardware feedback and model-derived pose without the full task |
+| [HSV detector check](tools/debug/detect_cup.py) / [YOLO detector check](tools/debug/yolo_coco_cup_test.py) | Standalone camera detections | Isolate perception behavior before integrating motion |
+
+Coordinate conventions remain explicit: the button pose recorder's
+`tip_minus_marker` and suggested offsets are base-frame differences, while the
+dedicated marker-offset tools return marker-frame offsets. Those values must
+be interpreted in the frame expected by the consuming controller.
+
+The diagnostics expose intermediate state so a failed task can be investigated
+one layer at a time. Saved CSVs, raw-teaching metadata, processed templates,
+reference samples, and plots provide records to inspect and compare.
 
 ### Evidence and validation
 
